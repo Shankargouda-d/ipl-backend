@@ -1,13 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../db");
+const pool = require("../db");
 
 router.get("/", async (req, res) => {
   try {
-    const [rows] = await db.query("SELECT * FROM teams ORDER BY team_name");
+    const [rows] = await pool.query("SELECT * FROM teams ORDER BY team_name");
     res.json(rows);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

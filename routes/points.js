@@ -1,13 +1,18 @@
 const express = require("express");
 const router = express.Router();
-const pointsService = require("../services/pointsService");
+const pool = require("../db");
 
 router.get("/", async (req, res) => {
   try {
-    const data = await pointsService.getPointsTable();
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const [rows] = await pool.query(
+      `SELECT pt.*, t.team_name, t.short_name, t.logo_url
+       FROM points_table pt
+       JOIN teams t ON pt.team_id = t.team_id
+       ORDER BY pt.points DESC, pt.nrr DESC`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

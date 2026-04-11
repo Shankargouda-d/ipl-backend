@@ -1,40 +1,65 @@
 const express = require("express");
 const router = express.Router();
-const playerService = require("../services/playerService");
+const pool = require("../db");
 
-router.get("/team/:teamId", async (req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const data = await playerService.getPlayersByTeam(req.params.teamId);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const { team_id } = req.query;
+    let query = `SELECT p.*, t.short_name, t.team_name
+                 FROM players p JOIN teams t ON p.team_id = t.team_id`;
+    const params = [];
+    if (team_id) {
+      query += " WHERE p.team_id = ?";
+      params.push(team_id);
+    }
+    query += " ORDER BY p.player_id";
+    const [rows] = await pool.query(query, params);
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 router.post("/", async (req, res) => {
   try {
-    const data = await playerService.addPlayer(req.body);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const { player_name, team_id, role, batting_style, bowling_style } = req.body;
+
+    const [[team]] = await pool.query(
+      "SELECT short_name FROM teams WHERE team_id = ?",
+      [team_id]
+    );
+    const prefix = team.short_name;
+
+    const [existing] = await pool.query(
+      "SELECT player_id FROM players WHERE player_id LIKE ? ORDER BY player_id DESC LIMIT 1",
+      [`${prefix}%`]
+    );
+
+    let nextNum = 1;
+    if (existing.length > 0) {
+      const lastNum = parseInt(existing[0].player_id.replace(prefix, ""));
+      nextNum = lastNum + 1;
+    }
+
+    const player_id = `${prefix}${String(nextNum).padStart(2, "0")}`;
+
+    await pool.query(
+      "INSERT INTO players (player_id, player_name, team_id, role, batting_style, bowling_style) VALUES (?, ?, ?, ?, ?, ?)",
+      [player_id, player_name, team_id, role, batting_style || null, bowling_style || null]
+    );
+
+    res.json({ success: true, player_id, player_name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-router.put("/:playerId", async (req, res) => {
+router.delete("/:player_id", async (req, res) => {
   try {
-    const data = await playerService.updatePlayer(req.params.playerId, req.body);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-router.delete("/:playerId", async (req, res) => {
-  try {
-    const data = await playerService.removePlayer(req.params.playerId);
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    await pool.query("DELETE FROM players WHERE player_id = ?", [req.params.player_id]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
