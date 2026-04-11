@@ -90,4 +90,15 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+router.delete("/:matchId", async (req, res) => {
+  try {
+    await db.query("DELETE FROM matches WHERE match_id = ?",
+      [req.params.matchId]);
+    res.json({ message: "Match deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
