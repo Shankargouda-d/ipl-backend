@@ -5,62 +5,60 @@ function calcStrikeRate(runs, balls) {
   return Number(((Number(runs) / Number(balls)) * 100).toFixed(2));
 }
 
-function ballsFromOvers(overs, balls) {
-  return Number(overs) * 6 + Number(balls);
-}
-
-function calcEconomy(runs, overs, balls) {
-  const totalBalls = ballsFromOvers(overs, balls);
-  if (!totalBalls) return 0;
-  return Number((Number(runs) / (totalBalls / 6)).toFixed(2));
+function calcEconomy(runs, overs) {
+  if (!overs || Number(overs) === 0) return 0;
+  return Number((Number(runs) / Number(overs)).toFixed(2));
 }
 
 async function saveToss(payload) {
-  const { match_id, toss_winner_team_id, toss_decision } = payload;
+  const { match_id, toss_winner_team_id, decision, batting_first_team_id } = payload;
   await db.query(
-    `INSERT INTO match_toss (match_id, toss_winner_team_id, toss_decision)
-     VALUES (?, ?, ?)
+    `INSERT INTO toss (match_id, toss_winner_team_id, decision, batting_first_team_id)
+     VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
      toss_winner_team_id = VALUES(toss_winner_team_id),
-     toss_decision = VALUES(toss_decision)`,
-    [match_id, toss_winner_team_id, toss_decision]
+     decision = VALUES(decision),
+     batting_first_team_id = VALUES(batting_first_team_id)`,
+    [match_id, toss_winner_team_id, decision, batting_first_team_id]
   );
   return { message: "Toss saved successfully" };
 }
 
 async function getTossByMatch(matchId) {
-  const [rows] = await db.query("SELECT * FROM match_toss WHERE match_id = ?", [matchId]);
+  const [rows] = await db.query(
+    `SELECT t.*, 
+      tm.team_name AS batting_first_name
+     FROM toss t
+     JOIN teams tm ON t.batting_first_team_id = tm.team_id
+     WHERE t.match_id = ?`,
+    [matchId]
+  );
   return rows[0] || null;
 }
 
 async function saveSquad(payload) {
   const { match_id, team_id, players } = payload;
-
-  await db.query("DELETE FROM match_team_selection WHERE match_id = ? AND team_id = ?", [match_id, team_id]);
-
+  await db.query(
+    "DELETE FROM playing11 WHERE match_id = ? AND team_id = ?",
+    [match_id, team_id]
+  );
   for (const player of players) {
     await db.query(
-      `INSERT INTO match_team_selection (match_id, team_id, player_id, is_playing_xi, is_impact_player)
-       VALUES (?, ?, ?, ?, ?)`,
-      [
-        match_id,
-        team_id,
-        player.player_id,
-        player.is_playing_xi ? 1 : 0,
-        player.is_impact_player ? 1 : 0,
-      ]
+      `INSERT INTO playing11 (match_id, team_id, player_id, is_impact_player)
+       VALUES (?, ?, ?, ?)`,
+      [match_id, team_id, player.player_id, player.is_impact_player ? 1 : 0]
     );
   }
-
   return { message: "Squad saved successfully" };
 }
 
 async function getSquad(matchId, teamId) {
   const [rows] = await db.query(
-    `SELECT s.*, p.player_name, p.player_role
-     FROM match_team_selection s
-     JOIN players p ON s.player_id = p.player_id
-     WHERE s.match_id = ? AND s.team_id = ?`,
+    `SELECT p11.id, p11.match_id, p11.team_id, p11.is_impact_player,
+            p.player_id, p.player_name, p.player_role
+     FROM playing11 p11
+     JOIN players p ON p11.player_id = p.player_id
+     WHERE p11.match_id = ? AND p11.team_id = ?`,
     [matchId, teamId]
   );
   return rows;
@@ -68,135 +66,111 @@ async function getSquad(matchId, teamId) {
 
 async function saveInnings(payload) {
   const connection = await db.getConnection();
-
   try {
     await connection.beginTransaction();
 
     const {
       match_id,
-      innings_no,
+      innings_number,
       batting_team_id,
       bowling_team_id,
-      wickets,
-      overs_bowled,
-      balls_bowled,
-      wides,
-      no_balls,
-      byes,
-      leg_byes,
-      penalty_runs,
-      is_all_out,
-      max_overs,
+      total_runs,
+      total_wickets,
+      overs,
+      extras,
       batting,
       bowling,
     } = payload;
 
-    const battingRuns = batting.reduce((sum, row) => sum + Number(row.runs || 0), 0);
-    const extras =
-      Number(wides || 0) +
-      Number(no_balls || 0) +
-      Number(byes || 0) +
-      Number(leg_byes || 0) +
-      Number(penalty_runs || 0);
+    // Check if innings already exists
+    const [existing] = await connection.query(
+      "SELECT innings_id FROM innings WHERE match_id = ? AND innings_number = ?",
+      [match_id, innings_number]
+    );
 
-    const total_runs = battingRuns + extras;
+    let innings_id;
 
+    if (existing.length > 0) {
+      innings_id = existing[0].innings_id;
+      await connection.query(
+        `UPDATE innings SET
+         batting_team_id = ?, bowling_team_id = ?,
+         total_runs = ?, total_wickets = ?,
+         overs = ?, extras = ?
+         WHERE innings_id = ?`,
+        [batting_team_id, bowling_team_id, total_runs,
+         total_wickets, overs, extras, innings_id]
+      );
+    } else {
+      const [result] = await connection.query(
+        `INSERT INTO innings
+         (match_id, innings_number, batting_team_id, bowling_team_id,
+          total_runs, total_wickets, overs, extras)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [match_id, innings_number, batting_team_id, bowling_team_id,
+         total_runs, total_wickets, overs, extras]
+      );
+      innings_id = result.insertId;
+    }
+
+    // Delete old records
     await connection.query(
-      `INSERT INTO innings
-      (match_id, innings_no, batting_team_id, bowling_team_id, total_runs, wickets,
-       overs_bowled, balls_bowled, wides, no_balls, byes, leg_byes, penalty_runs, is_all_out, max_overs)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON DUPLICATE KEY UPDATE
-      batting_team_id = VALUES(batting_team_id),
-      bowling_team_id = VALUES(bowling_team_id),
-      total_runs = VALUES(total_runs),
-      wickets = VALUES(wickets),
-      overs_bowled = VALUES(overs_bowled),
-      balls_bowled = VALUES(balls_bowled),
-      wides = VALUES(wides),
-      no_balls = VALUES(no_balls),
-      byes = VALUES(byes),
-      leg_byes = VALUES(leg_byes),
-      penalty_runs = VALUES(penalty_runs),
-      is_all_out = VALUES(is_all_out),
-      max_overs = VALUES(max_overs)`,
-      [
-        match_id,
-        innings_no,
-        batting_team_id,
-        bowling_team_id,
-        total_runs,
-        wickets,
-        overs_bowled,
-        balls_bowled,
-        wides,
-        no_balls,
-        byes,
-        leg_byes,
-        penalty_runs,
-        is_all_out ? 1 : 0,
-        max_overs || 20,
-      ]
+      "DELETE FROM batting_scorecard WHERE innings_id = ?", [innings_id]
+    );
+    await connection.query(
+      "DELETE FROM bowling_scorecard WHERE innings_id = ?", [innings_id]
     );
 
-    const [inningsRows] = await connection.query(
-      "SELECT innings_id FROM innings WHERE match_id = ? AND innings_no = ?",
-      [match_id, innings_no]
-    );
-
-    const innings_id = inningsRows[0].innings_id;
-
-    await connection.query("DELETE FROM innings_batting WHERE innings_id = ?", [innings_id]);
-    await connection.query("DELETE FROM innings_bowling WHERE innings_id = ?", [innings_id]);
-
+    // Insert batting
     for (const row of batting) {
       if (!row.player_id) continue;
       await connection.query(
-        `INSERT INTO innings_batting
-        (innings_id, player_id, batting_position, runs, balls, fours, sixes, is_out, dismissal_type, strike_rate)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO batting_scorecard
+         (innings_id, player_id, runs, balls, fours, sixes,
+          dismissal_type, wicket_taker_player_id, fielder_player_id,
+          strike_rate, batting_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           innings_id,
           row.player_id,
-          row.batting_position || null,
           row.runs || 0,
           row.balls || 0,
           row.fours || 0,
           row.sixes || 0,
-          row.is_out ? 1 : 0,
-          row.dismissal_type || null,
+          row.dismissal_type || "not out",
+          row.wicket_taker_player_id || null,
+          row.fielder_player_id || null,
           calcStrikeRate(row.runs || 0, row.balls || 0),
+          row.batting_order || null,
         ]
       );
     }
 
+    // Insert bowling
     for (const row of bowling) {
       if (!row.player_id) continue;
       await connection.query(
-        `INSERT INTO innings_bowling
-        (innings_id, player_id, overs, balls, maidens, runs_conceded, wickets, economy)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO bowling_scorecard
+         (innings_id, player_id, overs, maidens, runs_conceded,
+          wickets, economy, wides, no_balls)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           innings_id,
           row.player_id,
           row.overs || 0,
-          row.balls || 0,
           row.maidens || 0,
           row.runs_conceded || 0,
           row.wickets || 0,
-          calcEconomy(row.runs_conceded || 0, row.overs || 0, row.balls || 0),
+          calcEconomy(row.runs_conceded || 0, row.overs || 0),
+          row.wides || 0,
+          row.no_balls || 0,
         ]
       );
     }
 
     await connection.commit();
+    return { message: "Innings saved successfully", innings_id, total_runs, extras };
 
-    return {
-      message: "Innings saved successfully",
-      innings_id,
-      total_runs,
-      extras,
-    };
   } catch (error) {
     await connection.rollback();
     throw error;
@@ -207,7 +181,7 @@ async function saveInnings(payload) {
 
 async function getInningsByMatch(matchId) {
   const [rows] = await db.query(
-    "SELECT * FROM innings WHERE match_id = ? ORDER BY innings_no",
+    "SELECT * FROM innings WHERE match_id = ? ORDER BY innings_number",
     [matchId]
   );
   return rows;
