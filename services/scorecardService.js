@@ -54,8 +54,16 @@ async function saveSquad(payload) {
 
 async function getSquad(matchId, teamId) {
   const [rows] = await db.query(
-    `SELECT p11.id, p11.match_id, p11.team_id, p11.is_impact_player,
-            p.player_id, p.player_name, p.player_role
+    `SELECT 
+        p11.id,
+        p11.match_id,
+        p11.team_id,
+        p11.is_impact_player,
+        p.player_id,
+        p.player_name,
+        p.role AS player_role,
+        p.batting_style,
+        p.bowling_style
      FROM playing11 p11
      JOIN players p ON p11.player_id = p.player_id
      WHERE p11.match_id = ? AND p11.team_id = ?`,
@@ -63,6 +71,7 @@ async function getSquad(matchId, teamId) {
   );
   return rows;
 }
+
 
 async function saveInnings(payload) {
   const connection = await db.getConnection();
