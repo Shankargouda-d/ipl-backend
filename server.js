@@ -12,6 +12,7 @@ const resultsRoutes = require("./routes/results");
 const pointsRoutes = require("./routes/points");
 const statsRoutes = require("./routes/stats");
 
+
 const app = express();
 
 app.use(cors());
