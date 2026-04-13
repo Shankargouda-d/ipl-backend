@@ -12,7 +12,6 @@ const resultsRoutes = require("./routes/results");
 const pointsRoutes = require("./routes/points");
 const statsRoutes = require("./routes/stats");
 
-
 const app = express();
 
 app.use(cors());
@@ -33,4 +32,7 @@ app.use("/api/points", pointsRoutes);
 app.use("/api/stats", statsRoutes);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+
+app.listen(PORT, () => {
+  console.log(`Server running on ${PORT}`);
+});
