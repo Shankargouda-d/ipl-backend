@@ -3,7 +3,9 @@ const router = express.Router();
 const scorecardService = require("../services/scorecardService");
 const db = require("../db");
 
+// ─────────────────────────────────────────────────────────────
 // Save full innings (batting + bowling together)
+// ─────────────────────────────────────────────────────────────
 router.post("/save", async (req, res) => {
   try {
     const result = await scorecardService.saveInnings(req.body);
@@ -14,39 +16,19 @@ router.post("/save", async (req, res) => {
   }
 });
 
-// Get all innings for a match
-router.get("/:matchId", async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT i.*,
-              t1.team_name AS batting_team_name,
-              t2.team_name AS bowling_team_name
-       FROM innings i
-       LEFT JOIN teams t1 ON i.batting_team_id = t1.team_id
-       LEFT JOIN teams t2 ON i.bowling_team_id = t2.team_id
-       WHERE i.match_id = ?
-       ORDER BY i.innings_number`,
-      [req.params.matchId]
-    );
-    res.json(rows);
-  } catch (error) {
-    console.error("innings fetch error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
+// ─────────────────────────────────────────────────────────────
 // Get batting scorecard for an innings
-// Includes wicket taker and fielder names
-// Also includes players who did not bat
+// Includes wicket taker & fielder names
+// Also includes players who did not bat (from playing11)
+// IMPORTANT: specific routes MUST come before /:inningsId or /:matchId
+// ─────────────────────────────────────────────────────────────
 router.get("/:inningsId/batting", async (req, res) => {
   try {
     const inningsId = req.params.inningsId;
 
     // Get innings info first
     const [inningsRows] = await db.query(
-      `SELECT innings_id, match_id, batting_team_id
-       FROM innings
-       WHERE innings_id = ?`,
+      "SELECT innings_id, match_id, batting_team_id FROM innings WHERE innings_id = ?",
       [inningsId]
     );
 
@@ -56,21 +38,19 @@ router.get("/:inningsId/batting", async (req, res) => {
 
     const { match_id, batting_team_id } = inningsRows[0];
 
-    // Get full batting team squad for that match
-    // This assumes your squad table is named 'squad'
-    // and has columns: match_id, team_id, player_id
+    // Get full batting team playing11 for that match
     const [squadRows] = await db.query(
       `SELECT
-         s.player_id,
+         p11.player_id,
          p.player_name
-       FROM squad s
-       JOIN players p ON s.player_id = p.player_id
-       WHERE s.match_id = ? AND s.team_id = ?
+       FROM playing11 p11
+       JOIN players p ON p11.player_id = p.player_id
+       WHERE p11.match_id = ? AND p11.team_id = ?
        ORDER BY p.player_name`,
       [match_id, batting_team_id]
     );
 
-    // Get saved batting rows
+    // Get saved batting rows with wicket taker & fielder names
     const [batRows] = await db.query(
       `SELECT
          bs.*,
@@ -89,48 +69,56 @@ router.get("/:inningsId/batting", async (req, res) => {
     // Map existing batting rows by player_id
     const batMap = {};
     batRows.forEach((row) => {
-      batMap[row.player_id] = row;
+      batMap[String(row.player_id)] = row;
     });
 
-    // Merge squad with batting rows
+    // Merge playing11 with batting rows
     const finalRows = squadRows.map((player, index) => {
-      if (batMap[player.player_id]) {
-        return batMap[player.player_id];
+      const key = String(player.player_id);
+      if (batMap[key]) {
+        return batMap[key];
       }
 
+      // Did not bat entry
       return {
         id: `dnb-${inningsId}-${player.player_id}`,
         innings_id: Number(inningsId),
         player_id: player.player_id,
         player_name: player.player_name,
-        runs: 0,
-        balls: 0,
-        fours: 0,
-        sixes: 0,
+        runs: 0,             // or null if you prefer
+        balls: 0,            // or null
+        fours: 0,            // or null
+        sixes: 0,            // or null
         dismissal_type: "did not bat",
         wicket_taker_player_id: null,
         wicket_taker_name: null,
         fielder_player_id: null,
         fielder_name: null,
-        batting_order: 100 + index,
+        batting_order: 100 + index, // push DNB to bottom
       };
     });
 
     // Sort actual batting rows first, did-not-bat after them
-    finalRows.sort((a, b) => (a.batting_order || 999) - (b.batting_order || 999));
+    finalRows.sort(
+      (a, b) => (a.batting_order ?? 999) - (b.batting_order ?? 999)
+    );
 
-    res.json(finalRows);
+    return res.json(finalRows);
   } catch (error) {
     console.error("batting fetch error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// ─────────────────────────────────────────────────────────────
 // Get bowling scorecard for an innings
+// ─────────────────────────────────────────────────────────────
 router.get("/:inningsId/bowling", async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT bs.*, p.player_name
+      `SELECT
+         bs.*,
+         p.player_name
        FROM bowling_scorecard bs
        JOIN players p ON bs.player_id = p.player_id
        WHERE bs.innings_id = ?
@@ -140,6 +128,31 @@ router.get("/:inningsId/bowling", async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error("bowling fetch error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Get all innings for a match
+// NOTE: use /match/:matchId to avoid conflict with /:inningsId
+// ─────────────────────────────────────────────────────────────
+router.get("/match/:matchId", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT
+         i.*,
+         t1.team_name AS batting_team_name,
+         t2.team_name AS bowling_team_name
+       FROM innings i
+       LEFT JOIN teams t1 ON i.batting_team_id = t1.team_id
+       LEFT JOIN teams t2 ON i.bowling_team_id = t2.team_id
+       WHERE i.match_id = ?
+       ORDER BY i.innings_number`,
+      [req.params.matchId]
+    );
+    res.json(rows);
+  } catch (error) {
+    console.error("innings fetch error:", error);
     res.status(500).json({ error: error.message });
   }
 });
