@@ -90,6 +90,7 @@ router.post("/complete", async (req, res) => {
       result_text = "Match tied";
     }
 
+    // save result row
     await conn.query(
       `INSERT INTO match_result
         (match_id, winner_team_id, team1_runs, team2_runs, team1_overs, team2_overs, player_of_match, result_text)
@@ -114,85 +115,11 @@ router.post("/complete", async (req, res) => {
       ]
     );
 
+    // mark match completed
     await conn.query(
       "UPDATE matches SET status = 'completed' WHERE match_id = ?",
       [match_id]
     );
-
-    const [allBatting] = await conn.query(
-      `SELECT bs.*
-       FROM batting_scorecard bs
-       JOIN innings i ON bs.innings_id = i.innings_id
-       WHERE i.match_id = ?`,
-      [match_id]
-    );
-
-    for (const b of allBatting) {
-      const is50 = Number(b.runs) >= 50 && Number(b.runs) < 100 ? 1 : 0;
-      const is100 = Number(b.runs) >= 100 ? 1 : 0;
-
-      await conn.query(
-        `INSERT INTO batting_stats
-          (player_id, matches_played, total_runs, total_fours, total_sixes, fifties, hundreds, highest_score)
-         VALUES (?, 1, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           matches_played = matches_played + 1,
-           total_runs = total_runs + VALUES(total_runs),
-           total_fours = total_fours + VALUES(total_fours),
-           total_sixes = total_sixes + VALUES(total_sixes),
-           fifties = fifties + VALUES(fifties),
-           hundreds = hundreds + VALUES(hundreds),
-           highest_score = GREATEST(highest_score, VALUES(highest_score))`,
-        [b.player_id, b.runs, b.fours, b.sixes, is50, is100, b.runs]
-      );
-
-      await conn.query(
-        `UPDATE batting_stats
-         SET batting_avg = ROUND(total_runs / GREATEST(matches_played, 1), 2),
-             strike_rate = CASE
-               WHEN matches_played > 0 THEN ROUND(total_runs * 100.0 / GREATEST(matches_played * 30, 1), 2)
-               ELSE 0
-             END
-         WHERE player_id = ?`,
-        [b.player_id]
-      );
-    }
-
-    const [allBowling] = await conn.query(
-      `SELECT bw.*
-       FROM bowling_scorecard bw
-       JOIN innings i ON bw.innings_id = i.innings_id
-       WHERE i.match_id = ?`,
-      [match_id]
-    );
-
-    for (const b of allBowling) {
-      await conn.query(
-        `INSERT INTO bowling_stats
-          (player_id, matches_played, total_overs, total_wickets, runs_conceded)
-         VALUES (?, 1, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           matches_played = matches_played + 1,
-           total_overs = total_overs + VALUES(total_overs),
-           total_wickets = total_wickets + VALUES(total_wickets),
-           runs_conceded = runs_conceded + VALUES(runs_conceded)`,
-        [b.player_id, b.overs, b.wickets, b.runs_conceded]
-      );
-
-      await conn.query(
-        `UPDATE bowling_stats
-         SET economy = CASE
-               WHEN total_overs > 0 THEN ROUND(runs_conceded / total_overs, 2)
-               ELSE 0
-             END,
-             bowling_avg = CASE
-               WHEN total_wickets > 0 THEN ROUND(runs_conceded / total_wickets, 2)
-               ELSE 0
-             END
-         WHERE player_id = ?`,
-        [b.player_id]
-      );
-    }
 
     const isTied = result_text === "Match tied";
 
