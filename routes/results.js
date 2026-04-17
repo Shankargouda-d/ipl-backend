@@ -7,31 +7,36 @@ async function getTeamName(conn, team_id) {
     "SELECT team_name FROM teams WHERE team_id = ?",
     [team_id]
   );
-  return team.team_name;
+  return team?.team_name || "";
 }
 
 async function updateNRR(conn, team_id) {
   const [scored] = await conn.query(
     `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0.1) AS overs
-     FROM innings i JOIN matches m ON i.match_id = m.match_id
+     FROM innings i
+     JOIN matches m ON i.match_id = m.match_id
      WHERE i.batting_team_id = ? AND m.status = 'completed'`,
     [team_id]
   );
+
   const [conceded] = await conn.query(
     `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0.1) AS overs
-     FROM innings i JOIN matches m ON i.match_id = m.match_id
+     FROM innings i
+     JOIN matches m ON i.match_id = m.match_id
      WHERE i.bowling_team_id = ? AND m.status = 'completed'`,
     [team_id]
   );
 
-  const rs = scored[0].runs, of_ = scored[0].overs || 0.1;
-  const rc = conceded[0].runs, ob = conceded[0].overs || 0.1;
+  const rs = Number(scored[0]?.runs || 0);
+  const of_ = Number(scored[0]?.overs || 0.1);
+  const rc = Number(conceded[0]?.runs || 0);
+  const ob = Number(conceded[0]?.overs || 0.1);
   const nrr = ((rs / of_) - (rc / ob)).toFixed(3);
 
   await conn.query(
     `UPDATE points_table
-     SET runs_scored=?, overs_faced=?, runs_conceded=?, overs_bowled=?, nrr=?
-     WHERE team_id=?`,
+     SET runs_scored = ?, overs_faced = ?, runs_conceded = ?, overs_bowled = ?, nrr = ?
+     WHERE team_id = ?`,
     [rs, of_, rc, ob, nrr, team_id]
   );
 }
@@ -41,7 +46,8 @@ router.post("/complete", async (req, res) => {
   try {
     await conn.beginTransaction();
 
-    const { match_id } = req.body;
+    const { match_id, player_of_match_id } = req.body;
+    const player_of_match = player_of_match_id || null;
 
     const [innings] = await conn.query(
       "SELECT * FROM innings WHERE match_id = ? ORDER BY innings_number",
@@ -50,76 +56,80 @@ router.post("/complete", async (req, res) => {
 
     if (innings.length < 2) {
       await conn.rollback();
-      conn.release();
       return res.status(400).json({ error: "Both innings must be entered first" });
     }
 
     const inn1 = innings[0];
     const inn2 = innings[1];
+
     const [[match]] = await conn.query(
       "SELECT team1_id, team2_id FROM matches WHERE match_id = ?",
       [match_id]
     );
 
-    let winner_team_id, result_text;
-    if (inn1.total_runs > inn2.total_runs) {
+    if (!match) {
+      await conn.rollback();
+      return res.status(404).json({ error: "Match not found" });
+    }
+
+    let winner_team_id = null;
+    let result_text = "";
+
+    if (Number(inn1.total_runs) > Number(inn2.total_runs)) {
       winner_team_id = inn1.batting_team_id;
-      const diff = inn1.total_runs - inn2.total_runs;
+      const diff = Number(inn1.total_runs) - Number(inn2.total_runs);
       const name = await getTeamName(conn, inn1.batting_team_id);
       result_text = `${name} won by ${diff} runs`;
-    } else if (inn2.total_runs > inn1.total_runs) {
+    } else if (Number(inn2.total_runs) > Number(inn1.total_runs)) {
       winner_team_id = inn2.batting_team_id;
-      const wickets = 10 - inn2.total_wickets;
+      const wickets = 10 - Number(inn2.total_wickets || 0);
       const name = await getTeamName(conn, inn2.batting_team_id);
       result_text = `${name} won by ${wickets} wickets`;
     } else {
-      winner_team_id = inn1.batting_team_id;
+      winner_team_id = null;
       result_text = "Match tied";
     }
 
-    // Player of the match = highest runs scorer
-    const [topBatter] = await conn.query(
-      `SELECT bs.player_id, SUM(bs.runs) AS total
-       FROM batting_scorecard bs
-       JOIN innings i ON bs.innings_id = i.innings_id
-       WHERE i.match_id = ?
-       GROUP BY bs.player_id
-       ORDER BY total DESC LIMIT 1`,
-      [match_id]
-    );
-    const player_of_match = topBatter[0]?.player_id || null;
-
-    // Save match result
     await conn.query(
       `INSERT INTO match_result
         (match_id, winner_team_id, team1_runs, team2_runs, team1_overs, team2_overs, player_of_match, result_text)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE
-         winner_team_id=VALUES(winner_team_id), team1_runs=VALUES(team1_runs),
-         team2_runs=VALUES(team2_runs), team1_overs=VALUES(team1_overs),
-         team2_overs=VALUES(team2_overs), player_of_match=VALUES(player_of_match),
-         result_text=VALUES(result_text)`,
-      [match_id, winner_team_id, inn1.total_runs, inn2.total_runs,
-       inn1.overs, inn2.overs, player_of_match, result_text]
+         winner_team_id = VALUES(winner_team_id),
+         team1_runs = VALUES(team1_runs),
+         team2_runs = VALUES(team2_runs),
+         team1_overs = VALUES(team1_overs),
+         team2_overs = VALUES(team2_overs),
+         player_of_match = VALUES(player_of_match),
+         result_text = VALUES(result_text)`,
+      [
+        match_id,
+        winner_team_id,
+        inn1.total_runs,
+        inn2.total_runs,
+        inn1.overs,
+        inn2.overs,
+        player_of_match,
+        result_text,
+      ]
     );
 
-    // Update match status
     await conn.query(
       "UPDATE matches SET status = 'completed' WHERE match_id = ?",
       [match_id]
     );
 
-    // Update batting stats
     const [allBatting] = await conn.query(
-      `SELECT bs.* FROM batting_scorecard bs
+      `SELECT bs.*
+       FROM batting_scorecard bs
        JOIN innings i ON bs.innings_id = i.innings_id
        WHERE i.match_id = ?`,
       [match_id]
     );
 
     for (const b of allBatting) {
-      const is50 = b.runs >= 50 && b.runs < 100 ? 1 : 0;
-      const is100 = b.runs >= 100 ? 1 : 0;
+      const is50 = Number(b.runs) >= 50 && Number(b.runs) < 100 ? 1 : 0;
+      const is100 = Number(b.runs) >= 100 ? 1 : 0;
 
       await conn.query(
         `INSERT INTO batting_stats
@@ -137,19 +147,20 @@ router.post("/complete", async (req, res) => {
       );
 
       await conn.query(
-        `UPDATE batting_stats SET
-           batting_avg = ROUND(total_runs / GREATEST(matches_played, 1), 2),
-           strike_rate = CASE WHEN matches_played > 0
-             THEN ROUND(total_runs * 100.0 / GREATEST(matches_played * 30, 1), 2)
-             ELSE 0 END
+        `UPDATE batting_stats
+         SET batting_avg = ROUND(total_runs / GREATEST(matches_played, 1), 2),
+             strike_rate = CASE
+               WHEN matches_played > 0 THEN ROUND(total_runs * 100.0 / GREATEST(matches_played * 30, 1), 2)
+               ELSE 0
+             END
          WHERE player_id = ?`,
         [b.player_id]
       );
     }
 
-    // Update bowling stats
     const [allBowling] = await conn.query(
-      `SELECT bw.* FROM bowling_scorecard bw
+      `SELECT bw.*
+       FROM bowling_scorecard bw
        JOIN innings i ON bw.innings_id = i.innings_id
        WHERE i.match_id = ?`,
       [match_id]
@@ -169,33 +180,42 @@ router.post("/complete", async (req, res) => {
       );
 
       await conn.query(
-        `UPDATE bowling_stats SET
-           economy = CASE WHEN total_overs > 0 THEN ROUND(runs_conceded / total_overs, 2) ELSE 0 END,
-           bowling_avg = CASE WHEN total_wickets > 0 THEN ROUND(runs_conceded / total_wickets, 2) ELSE 0 END
+        `UPDATE bowling_stats
+         SET economy = CASE
+               WHEN total_overs > 0 THEN ROUND(runs_conceded / total_overs, 2)
+               ELSE 0
+             END,
+             bowling_avg = CASE
+               WHEN total_wickets > 0 THEN ROUND(runs_conceded / total_wickets, 2)
+               ELSE 0
+             END
          WHERE player_id = ?`,
         [b.player_id]
       );
     }
 
-    // Update points table
     const isTied = result_text === "Match tied";
-    const loser_team_id =
-      parseInt(winner_team_id) === match.team1_id ? match.team2_id : match.team1_id;
 
     if (isTied) {
       for (const tid of [match.team1_id, match.team2_id]) {
         await conn.query(
-          "UPDATE points_table SET played=played+1, tied=tied+1, points=points+1 WHERE team_id=?",
+          "UPDATE points_table SET played = played + 1, tied = tied + 1, points = points + 1 WHERE team_id = ?",
           [tid]
         );
       }
     } else {
+      const loser_team_id =
+        Number(winner_team_id) === Number(match.team1_id)
+          ? match.team2_id
+          : match.team1_id;
+
       await conn.query(
-        "UPDATE points_table SET played=played+1, won=won+1, points=points+2 WHERE team_id=?",
+        "UPDATE points_table SET played = played + 1, won = won + 1, points = points + 2 WHERE team_id = ?",
         [winner_team_id]
       );
+
       await conn.query(
-        "UPDATE points_table SET played=played+1, lost=lost+1 WHERE team_id=?",
+        "UPDATE points_table SET played = played + 1, lost = lost + 1 WHERE team_id = ?",
         [loser_team_id]
       );
     }
@@ -207,7 +227,12 @@ router.post("/complete", async (req, res) => {
     res.json({ success: true, result_text, winner_team_id, player_of_match });
   } catch (err) {
     await conn.rollback();
-    res.status(500).json({ error: err.message });
+    console.error("RESULT COMPLETE ERROR:", err);
+    res.status(500).json({
+      error: err.message,
+      sqlMessage: err.sqlMessage || null,
+      code: err.code || null,
+    });
   } finally {
     conn.release();
   }
@@ -218,11 +243,12 @@ router.get("/:match_id", async (req, res) => {
     const [rows] = await pool.query(
       `SELECT mr.*, t.team_name AS winner_name, p.player_name AS potm_name
        FROM match_result mr
-       JOIN teams t ON mr.winner_team_id = t.team_id
+       LEFT JOIN teams t ON mr.winner_team_id = t.team_id
        LEFT JOIN players p ON mr.player_of_match = p.player_id
        WHERE mr.match_id = ?`,
       [req.params.match_id]
     );
+
     res.json(rows[0] || null);
   } catch (err) {
     res.status(500).json({ error: err.message });
