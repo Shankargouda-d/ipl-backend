@@ -47,7 +47,9 @@ router.get("/:inningsId/batting", async (req, res) => {
       [inningsId]
     );
 
-    if (!inn) return res.status(404).json({ error: "Innings not found" });
+    if (!inn) {
+      return res.status(404).json({ error: "Innings not found" });
+    }
 
     const [squad] = await db.query(
       `
@@ -76,27 +78,44 @@ router.get("/:inningsId/batting", async (req, res) => {
       [inningsId]
     );
 
-    const map = {};
-    bat.forEach((b) => {
-      map[b.player_id] = b;
+    const batMap = {};
+    bat.forEach((row) => {
+      batMap[String(row.player_id)] = row;
     });
 
-    const final = squad.map((p, i) => {
-      return (
-        map[p.player_id] || {
-          player_id: p.player_id,
-          player_name: p.player_name,
-          runs: 0,
-          balls: 0,
-          fours: 0,
-          sixes: 0,
-          dismissal_type: "did not bat",
-          batting_order: 100 + i,
-        }
-      );
+    const finalRows = squad.map((player, index) => {
+      const key = String(player.player_id);
+
+      if (batMap[key]) {
+        return batMap[key];
+      }
+
+      return {
+        id: `dnb-${inningsId}-${player.player_id}`,
+        innings_id: inningsId,
+        player_id: player.player_id,
+        player_name: player.player_name,
+        runs: 0,
+        balls: 0,
+        fours: 0,
+        sixes: 0,
+        strike_rate: 0,
+        dismissal_type: "did not bat",
+        wicket_taker_player_id: null,
+        wicket_taker_name: null,
+        fielder_player_id: null,
+        fielder_name: null,
+        batting_order: 100 + index,
+      };
     });
 
-    res.json(final);
+    finalRows.sort((a, b) => {
+      const orderA = a.batting_order ?? 999;
+      const orderB = b.batting_order ?? 999;
+      return orderA - orderB;
+    });
+
+    res.json(finalRows);
   } catch (error) {
     console.error("batting error:", error);
     res.status(500).json({ error: error.message });
@@ -144,7 +163,6 @@ router.post("/save", async (req, res) => {
       bowling,
     } = req.body;
 
-    // Check if innings already exists
     const [existing] = await db.query(
       `SELECT innings_id FROM innings WHERE match_id = ? AND innings_number = ?`,
       [match_id, innings_number]
@@ -175,7 +193,6 @@ router.post("/save", async (req, res) => {
         ]
       );
 
-      // Delete old scorecards
       await db.query(`DELETE FROM batting_scorecard WHERE innings_id = ?`, [innings_id]);
       await db.query(`DELETE FROM bowling_scorecard WHERE innings_id = ?`, [innings_id]);
     } else {
@@ -198,7 +215,6 @@ router.post("/save", async (req, res) => {
       innings_id = ins.insertId;
     }
 
-    // Insert batting
     for (const b of batting) {
       await db.query(
         `INSERT INTO batting_scorecard
@@ -220,7 +236,6 @@ router.post("/save", async (req, res) => {
       );
     }
 
-    // Insert bowling
     for (const b of bowling) {
       await db.query(
         `INSERT INTO bowling_scorecard
@@ -240,7 +255,6 @@ router.post("/save", async (req, res) => {
     }
 
     res.json({ message: "Innings saved successfully" });
-
   } catch (error) {
     console.error("save innings error:", error);
     res.status(500).json({ error: error.message });
