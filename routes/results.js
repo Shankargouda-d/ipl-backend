@@ -56,7 +56,9 @@ router.post("/complete", async (req, res) => {
 
     if (innings.length < 2) {
       await conn.rollback();
-      return res.status(400).json({ error: "Both innings must be entered first" });
+      return res
+        .status(400)
+        .json({ error: "Both innings must be entered first" });
     }
 
     const inn1 = innings[0];
@@ -122,28 +124,49 @@ router.post("/complete", async (req, res) => {
     );
 
     const isTied = result_text === "Match tied";
+    const team1Id = match.team1_id;
+    const team2Id = match.team2_id;
 
     if (isTied) {
-      for (const tid of [match.team1_id, match.team2_id]) {
+      // both teams: played+1, tied+1, points+1
+      for (const tid of [team1Id, team2Id]) {
         await conn.query(
-          "UPDATE points_table SET played = played + 1, tied = tied + 1, points = points + 1 WHERE team_id = ?",
+          `INSERT INTO points_table
+             (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
+           VALUES (?, 1, 0, 0, 1, 1, 0.000, 0, 0.0, 0, 0.0)
+           ON DUPLICATE KEY UPDATE
+             played = played + 1,
+             tied = tied + 1,
+             points = points + 1`,
           [tid]
         );
       }
     } else {
-      const loser_team_id =
-        Number(winner_team_id) === Number(match.team1_id)
-          ? match.team2_id
-          : match.team1_id;
+      const winnerId = winner_team_id;
+      const loserId =
+        Number(winner_team_id) === Number(team1Id) ? team2Id : team1Id;
 
+      // winner: played+1, won+1, points+2
       await conn.query(
-        "UPDATE points_table SET played = played + 1, won = won + 1, points = points + 2 WHERE team_id = ?",
-        [winner_team_id]
+        `INSERT INTO points_table
+           (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
+         VALUES (?, 1, 1, 0, 0, 2, 0.000, 0, 0.0, 0, 0.0)
+         ON DUPLICATE KEY UPDATE
+           played = played + 1,
+           won = won + 1,
+           points = points + 2`,
+        [winnerId]
       );
 
+      // loser: played+1, lost+1
       await conn.query(
-        "UPDATE points_table SET played = played + 1, lost = lost + 1 WHERE team_id = ?",
-        [loser_team_id]
+        `INSERT INTO points_table
+           (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
+         VALUES (?, 1, 0, 1, 0, 0, 0.000, 0, 0.0, 0, 0.0)
+         ON DUPLICATE KEY UPDATE
+           played = played + 1,
+           lost = lost + 1`,
+        [loserId]
       );
     }
 
