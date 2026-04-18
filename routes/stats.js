@@ -266,4 +266,43 @@ router.get("/compare", async (req, res) => {
   }
 });
 
+// Match-by-match batting stats for a player (for trend chart)
+router.get("/player-matches/:playerId", async (req, res) => {
+  try {
+    const { playerId } = req.params;
+    const [rows] = await db.query(
+      `
+      SELECT
+        m.match_id,
+        m.match_number,
+        m.match_date,
+        CONCAT(t1.short_name, ' vs ', t2.short_name) AS match_label,
+        COALESCE(bs.runs, 0)   AS runs,
+        COALESCE(bs.balls, 0)  AS balls,
+        COALESCE(bs.fours, 0)  AS fours,
+        COALESCE(bs.sixes, 0)  AS sixes,
+        COALESCE(bw.wickets, 0) AS wickets
+      FROM matches m
+      JOIN teams t1 ON m.team1_id = t1.team_id
+      JOIN teams t2 ON m.team2_id = t2.team_id
+      LEFT JOIN innings i ON i.match_id = m.match_id
+      LEFT JOIN batting_scorecard bs
+        ON bs.innings_id = i.innings_id AND bs.player_id = ?
+      LEFT JOIN bowling_scorecard bw
+        ON bw.innings_id = i.innings_id AND bw.player_id = ?
+      WHERE m.status = 'completed'
+        AND (bs.player_id = ? OR bw.player_id = ?)
+      GROUP BY m.match_id, m.match_number, m.match_date, match_label,
+               bs.runs, bs.balls, bs.fours, bs.sixes, bw.wickets
+      ORDER BY m.match_date ASC, m.match_number ASC
+      `,
+      [playerId, playerId, playerId, playerId]
+    );
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
+
