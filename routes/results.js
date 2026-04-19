@@ -27,11 +27,19 @@ async function updateNRR(conn, team_id) {
     [team_id]
   );
 
-  const rs = Number(scored[0]?.runs || 0);
-  const of_ = Number(scored[0]?.overs || 0.1);
-  const rc = Number(conceded[0]?.runs || 0);
-  const ob = Number(conceded[0]?.overs || 0.1);
-  const nrr = ((rs / of_) - (rc / ob)).toFixed(3);
+  // Convert stored overs (e.g. 3.4 = 3 overs 4 balls) to real fractional overs
+  function toRealOvers(storedOvers) {
+    const str = String(storedOvers);
+    const [whole, balls = "0"] = str.split(".");
+    return parseInt(whole) + parseInt(balls) / 6;
+  }
+
+  const rs  = Number(scored[0]?.runs   || 0);
+  const of_ = toRealOvers(scored[0]?.overs   || 0.1);
+  const rc  = Number(conceded[0]?.runs  || 0);
+  const ob  = toRealOvers(conceded[0]?.overs  || 0.1);
+
+  const nrr = ((rs / (of_ || 0.1)) - (rc / (ob || 0.1))).toFixed(3);
 
   await conn.query(
     `UPDATE points_table

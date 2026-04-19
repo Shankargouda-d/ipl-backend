@@ -96,8 +96,10 @@ router.get("/fifties", async (req, res) => {
         p.player_name,
         t.team_name,
         t.short_name,
+        COUNT(DISTINCT i.match_id) AS matches_played,
         SUM(CASE WHEN bs.runs BETWEEN 50 AND 99 THEN 1 ELSE 0 END) AS fifties,
-        SUM(bs.runs) AS total_runs
+        SUM(bs.runs) AS total_runs,
+        ROUND(AVG(bs.runs), 2) AS batting_avg
       FROM batting_scorecard bs
       JOIN innings i ON bs.innings_id = i.innings_id
       JOIN players p ON bs.player_id = p.player_id
@@ -122,6 +124,7 @@ router.get("/most-sixes", async (req, res) => {
         p.player_name,
         t.team_name,
         t.short_name,
+        COUNT(DISTINCT i.match_id) AS matches_played,
         SUM(bs.sixes) AS total_sixes
       FROM batting_scorecard bs
       JOIN innings i ON bs.innings_id = i.innings_id
