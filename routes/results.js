@@ -85,7 +85,12 @@ router.post("/complete", async (req, res) => {
     let winner_team_id = null;
     let result_text = "";
 
-    if (Number(inn1.total_runs) > Number(inn2.total_runs)) {
+    const { abandoned } = req.body;
+
+    if (abandoned) {
+      // No Result — rain or abandoned — both teams get 1 point
+      result_text = "No Result (Match Abandoned)";
+    } else if (Number(inn1.total_runs) > Number(inn2.total_runs)) {
       winner_team_id = inn1.batting_team_id;
       const diff = Number(inn1.total_runs) - Number(inn2.total_runs);
       const name = await getTeamName(conn, inn1.batting_team_id);
@@ -97,7 +102,7 @@ router.post("/complete", async (req, res) => {
       result_text = `${name} won by ${wickets} wickets`;
     } else {
       winner_team_id = null;
-      result_text = "Match tied";
+      result_text = "Match Tied";
     }
 
     // save result row
@@ -131,11 +136,12 @@ router.post("/complete", async (req, res) => {
       [match_id]
     );
 
-    const isTied = result_text === "Match tied";
+    const isTied = result_text === "Match Tied";
+    const isAbandoned = !!abandoned;
     const team1Id = match.team1_id;
     const team2Id = match.team2_id;
 
-    if (isTied) {
+    if (isTied || isAbandoned) {
       // both teams: played+1, tied+1, points+1
       for (const tid of [team1Id, team2Id]) {
         await conn.query(
