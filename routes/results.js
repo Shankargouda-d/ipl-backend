@@ -49,6 +49,67 @@ async function updateNRR(conn, team_id) {
   );
 }
 
+router.post("/abandon", async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const { match_id } = req.body;
+
+    const [[match]] = await conn.query(
+      "SELECT team1_id, team2_id FROM matches WHERE match_id = ?",
+      [match_id]
+    );
+
+    if (!match) {
+      await conn.rollback();
+      return res.status(404).json({ error: "Match not found" });
+    }
+
+    const team1Id = match.team1_id;
+    const team2Id = match.team2_id;
+    const result_text = "Match Abandoned without a ball bowled";
+
+    // Mark match completed
+    await conn.query(
+      "UPDATE matches SET status = 'completed' WHERE match_id = ?",
+      [match_id]
+    );
+
+    // Insert into match_result
+    await conn.query(
+      `INSERT INTO match_result
+        (match_id, winner_team_id, team1_runs, team2_runs, team1_overs, team2_overs, player_of_match, result_text)
+       VALUES (?, NULL, 0, 0, 0, 0, NULL, ?)
+       ON DUPLICATE KEY UPDATE
+         result_text = VALUES(result_text)`,
+      [match_id, result_text]
+    );
+
+    // Update points table (each gets 1 point)
+    for (const tid of [team1Id, team2Id]) {
+      await conn.query(
+        `INSERT INTO points_table
+           (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
+         VALUES (?, 1, 0, 0, 1, 1, 0.000, 0, 0.0, 0, 0.0)
+         ON DUPLICATE KEY UPDATE
+           played = played + 1,
+           tied = tied + 1,
+           points = points + 1`,
+        [tid]
+      );
+      await updateNRR(conn, tid);
+    }
+
+    await conn.commit();
+    res.json({ success: true, message: "Match abandoned successfully" });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ error: err.message });
+  } finally {
+    conn.release();
+  }
+});
+
 router.post("/complete", async (req, res) => {
   const conn = await pool.getConnection();
   try {
