@@ -139,17 +139,20 @@ router.delete("/:id", async (req, res) => {
         );
 
         function toRealOvers(storedOvers) {
+          if (!storedOvers) return 0;
           const str = String(storedOvers);
-          const [whole, balls = "0"] = str.split(".");
-          return parseInt(whole) + parseInt(balls) / 6;
+          const [whole = "0", balls = "0"] = str.split(".");
+          const wholeNum = parseInt(whole) || 0;
+          const ballsNum = parseInt(balls) || 0;
+          return wholeNum + ballsNum / 6;
         }
 
         const rs = Number(scored[0]?.runs || 0);
-        const of_ = toRealOvers(scored[0]?.overs || 0.1);
+        const of_ = toRealOvers(scored[0]?.overs);
         const rc = Number(conceded[0]?.runs || 0);
-        const ob = toRealOvers(conceded[0]?.overs || 0.1);
+        const ob = toRealOvers(conceded[0]?.overs);
 
-        const nrr = ((rs / (of_ || 0.1)) - (rc / (ob || 0.1))).toFixed(3);
+        const nrr = ((of_ ? rs / of_ : 0) - (ob ? rc / ob : 0)).toFixed(3);
 
         await conn.query(
           `UPDATE points_table
