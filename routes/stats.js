@@ -307,5 +307,101 @@ router.get("/player-matches/:playerId", async (req, res) => {
   }
 });
 
+// Get aggregated team stats for all teams
+router.get("/team-stats", async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT 
+        t.team_id,
+        t.team_name,
+        t.short_name,
+        SUM(bat.total_runs) AS total_runs,
+        SUM(bat.total_fours) AS total_fours,
+        SUM(bat.total_sixes) AS total_sixes,
+        SUM(bowl.total_wickets) AS total_wickets,
+        COUNT(DISTINCT m.match_id) AS matches_played
+      FROM teams t
+      LEFT JOIN matches m ON (t.team_id = m.team1_id OR t.team_id = m.team2_id) AND m.status = 'completed'
+      LEFT JOIN (
+        SELECT 
+          i.match_id,
+          i.batting_team_id,
+          SUM(bs.runs) AS total_runs,
+          SUM(bs.fours) AS total_fours,
+          SUM(bs.sixes) AS total_sixes
+        FROM innings i
+        JOIN batting_scorecard bs ON i.innings_id = bs.innings_id
+        GROUP BY i.match_id, i.batting_team_id
+      ) AS bat ON m.match_id = bat.match_id AND t.team_id = bat.batting_team_id
+      LEFT JOIN (
+        SELECT 
+          i.match_id,
+          i.bowling_team_id,
+          SUM(bw.wickets) AS total_wickets
+        FROM innings i
+        JOIN bowling_scorecard bw ON i.innings_id = bw.innings_id
+        GROUP BY i.match_id, i.bowling_team_id
+      ) AS bowl ON m.match_id = bowl.match_id AND t.team_id = bowl.bowling_team_id
+      GROUP BY t.team_id, t.team_name, t.short_name
+      ORDER BY total_runs DESC
+    `);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Compare two teams
+router.get("/team-compare", async (req, res) => {
+  try {
+    const { team1, team2 } = req.query;
+    if (!team1 || !team2) {
+      return res.status(400).json({ error: "Both team IDs required" });
+    }
+
+    const [rows] = await db.query(`
+      SELECT 
+        t.team_id,
+        t.team_name,
+        t.short_name,
+        COALESCE(SUM(bat.total_runs), 0) AS total_runs,
+        COALESCE(SUM(bat.total_fours), 0) AS total_fours,
+        COALESCE(SUM(bat.total_sixes), 0) AS total_sixes,
+        COALESCE(SUM(bowl.total_wickets), 0) AS total_wickets,
+        COUNT(DISTINCT m.match_id) AS matches_played,
+        ROUND(COALESCE(SUM(bat.total_runs), 0) / NULLIF(COUNT(DISTINCT m.match_id), 0), 2) AS avg_runs,
+        (SELECT COUNT(*) FROM match_result mr WHERE mr.winner_team_id = t.team_id) AS matches_won
+      FROM teams t
+      LEFT JOIN matches m ON (t.team_id = m.team1_id OR t.team_id = m.team2_id) AND m.status = 'completed'
+      LEFT JOIN (
+        SELECT 
+          i.match_id,
+          i.batting_team_id,
+          SUM(bs.runs) AS total_runs,
+          SUM(bs.fours) AS total_fours,
+          SUM(bs.sixes) AS total_sixes
+        FROM innings i
+        JOIN batting_scorecard bs ON i.innings_id = bs.innings_id
+        GROUP BY i.match_id, i.batting_team_id
+      ) AS bat ON m.match_id = bat.match_id AND t.team_id = bat.batting_team_id
+      LEFT JOIN (
+        SELECT 
+          i.match_id,
+          i.bowling_team_id,
+          SUM(bw.wickets) AS total_wickets
+        FROM innings i
+        JOIN bowling_scorecard bw ON i.innings_id = bw.innings_id
+        GROUP BY i.match_id, i.bowling_team_id
+      ) AS bowl ON m.match_id = bowl.match_id AND t.team_id = bowl.bowling_team_id
+      WHERE t.team_id IN (?, ?)
+      GROUP BY t.team_id, t.team_name, t.short_name
+    `, [team1, team2]);
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
+
 

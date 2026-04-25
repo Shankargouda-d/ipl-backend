@@ -94,12 +94,16 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "Match not found" });
     }
 
+    // Determine team IDs
+    const team1 = match.team1_id;
+    const team2 = match.team2_id;
+
     // Get result if exists
     const [results] = await conn.query("SELECT * FROM match_result WHERE match_id = ?", [matchId]);
     if (results.length > 0) {
       const result = results[0];
       const winner = result.winner_team_id;
-      const team1 = match.team1_id;
+
       const team2 = match.team2_id;
 
       if (winner) {
@@ -123,7 +127,7 @@ router.delete("/:id", async (req, res) => {
       // Update NRR for both teams (after deleting innings)
       for (const teamId of [team1, team2]) {
         const [scored] = await conn.query(
-          `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0.1) AS overs
+          `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0) AS overs
            FROM innings i
            JOIN matches m ON i.match_id = m.match_id
            WHERE i.batting_team_id = ? AND m.status = 'completed'`,
@@ -131,7 +135,7 @@ router.delete("/:id", async (req, res) => {
         );
 
         const [conceded] = await conn.query(
-          `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0.1) AS overs
+          `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0) AS overs
            FROM innings i
            JOIN matches m ON i.match_id = m.match_id
            WHERE i.bowling_team_id = ? AND m.status = 'completed'`,
@@ -139,12 +143,12 @@ router.delete("/:id", async (req, res) => {
         );
 
         function toRealOvers(storedOvers) {
-          if (!storedOvers) return 0;
+          if (storedOvers === undefined || storedOvers === null) return 0;
           const str = String(storedOvers);
           const [whole = "0", balls = "0"] = str.split(".");
           const wholeNum = parseInt(whole) || 0;
           const ballsNum = parseInt(balls) || 0;
-          return wholeNum + ballsNum / 6;
+          return wholeNum + (ballsNum / 6);
         }
 
         const rs = Number(scored[0]?.runs || 0);
@@ -152,7 +156,7 @@ router.delete("/:id", async (req, res) => {
         const rc = Number(conceded[0]?.runs || 0);
         const ob = toRealOvers(conceded[0]?.overs);
 
-        const nrr = ((of_ ? rs / of_ : 0) - (ob ? rc / ob : 0)).toFixed(3);
+        const nrr = ((of_ > 0 ? rs / of_ : 0) - (ob > 0 ? rc / ob : 0)).toFixed(3);
 
         await conn.query(
           `UPDATE points_table

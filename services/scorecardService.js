@@ -6,9 +6,21 @@ function calcStrikeRate(runs, balls) {
 }
 
 function calcEconomy(runs, overs) {
-  if (!overs || Number(overs) === 0) return 0;
-  return Number((Number(runs) / Number(overs)).toFixed(2));
+  // Return 0 if overs not provided
+  if (!overs) return 0;
+  // Convert overs string like "3.4" (3 overs 4 balls) to real overs
+  const realOvers = (() => {
+    const str = String(overs);
+    const [whole = "0", balls = "0"] = str.split('.');
+    const wholeNum = parseInt(whole) || 0;
+    const ballsNum = parseInt(balls) || 0;
+    return wholeNum + ballsNum / 6;
+  })();
+  if (realOvers === 0) return 0;
+  return Number((Number(runs) / realOvers).toFixed(2));
 }
+
+
 
 async function saveToss(payload) {
   const { match_id, toss_winner_team_id, decision, batting_first_team_id } = payload;
