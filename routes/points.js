@@ -5,12 +5,25 @@ const pool = require("../db");
 router.get("/", async (req, res) => {
   try {
     const [teams] = await pool.query("SELECT * FROM teams");
+
+    // Get completed match results for W/L/T
     const [matches] = await pool.query(`
-      SELECT m.team1_id, m.team2_id, mr.winner_team_id, 
-             mr.team1_runs, mr.team2_runs, 
-             mr.team1_overs, mr.team2_overs
+      SELECT m.match_id, m.team1_id, m.team2_id, mr.winner_team_id, mr.result_text
       FROM matches m
       JOIN match_result mr ON m.match_id = mr.match_id
+      WHERE m.status = 'completed'
+    `);
+
+    // Get innings data directly for accurate NRR calculation
+    const [inningsData] = await pool.query(`
+      SELECT 
+        i.match_id,
+        i.batting_team_id,
+        i.bowling_team_id,
+        i.total_runs,
+        i.overs
+      FROM innings i
+      JOIN matches m ON i.match_id = m.match_id
       WHERE m.status = 'completed'
     `);
 
@@ -27,6 +40,7 @@ router.get("/", async (req, res) => {
       let rs = 0, of_real = 0;
       let rc = 0, ob_real = 0;
 
+      // Count W/L/T from match results
       matches.forEach(m => {
         if (m.team1_id === t.team_id || m.team2_id === t.team_id) {
           played++;
@@ -38,17 +52,20 @@ router.get("/", async (req, res) => {
           } else {
             tied++;
           }
+        }
+      });
 
-          const isTeam1 = m.team1_id === t.team_id;
-          const runsFor = isTeam1 ? m.team1_runs : m.team2_runs;
-          const oversFor = isTeam1 ? m.team1_overs : m.team2_overs;
-          const runsAgainst = isTeam1 ? m.team2_runs : m.team1_runs;
-          const oversAgainst = isTeam1 ? m.team2_overs : m.team1_overs;
-
-          rs += (Number(runsFor) || 0);
-          of_real += toRealOvers(oversFor);
-          rc += (Number(runsAgainst) || 0);
-          ob_real += toRealOvers(oversAgainst);
+      // Calculate NRR from innings table (much more reliable)
+      inningsData.forEach(inn => {
+        if (inn.batting_team_id === t.team_id) {
+          // This team batted — add to runs scored / overs faced
+          rs += (Number(inn.total_runs) || 0);
+          of_real += toRealOvers(inn.overs);
+        }
+        if (inn.bowling_team_id === t.team_id) {
+          // This team bowled — add to runs conceded / overs bowled
+          rc += (Number(inn.total_runs) || 0);
+          ob_real += toRealOvers(inn.overs);
         }
       });
 
@@ -60,7 +77,7 @@ router.get("/", async (req, res) => {
         played, won, lost, tied, points, 
         nrr: nrr.toFixed(3),
         runs_scored: rs,
-        overs_faced: of_real.toFixed(2), // Just for debugging visibility
+        overs_faced: of_real.toFixed(2),
         runs_conceded: rc,
         overs_bowled: ob_real.toFixed(2)
       };

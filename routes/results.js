@@ -113,6 +113,25 @@ router.post("/complete", async (req, res) => {
       result_text = "Match Tied";
     }
 
+    // Map runs/overs to the correct team (team1/team2 from matches table, NOT innings order)
+    const team1Id_m = match.team1_id;
+    const team2Id_m = match.team2_id;
+
+    let team1_runs, team2_runs, team1_overs, team2_overs;
+    if (Number(inn1.batting_team_id) === Number(team1Id_m)) {
+      // inn1 = team1 batting, inn2 = team2 batting
+      team1_runs = inn1.total_runs;
+      team1_overs = inn1.overs;
+      team2_runs = inn2.total_runs;
+      team2_overs = inn2.overs;
+    } else {
+      // inn1 = team2 batting, inn2 = team1 batting
+      team1_runs = inn2.total_runs;
+      team1_overs = inn2.overs;
+      team2_runs = inn1.total_runs;
+      team2_overs = inn1.overs;
+    }
+
     // save result row
     await conn.query(
       `INSERT INTO match_result
@@ -129,10 +148,10 @@ router.post("/complete", async (req, res) => {
       [
         match_id,
         winner_team_id,
-        inn1.total_runs,
-        inn2.total_runs,
-        inn1.overs,
-        inn2.overs,
+        team1_runs,
+        team2_runs,
+        team1_overs,
+        team2_overs,
         player_of_match,
         result_text,
       ]
