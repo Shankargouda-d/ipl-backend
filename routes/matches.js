@@ -22,7 +22,11 @@ router.get("/", async (req, res) => {
       query += " WHERE m.status = ?";
       params.push(status);
     }
-    query += " ORDER BY m.match_date DESC, m.match_number ASC";
+    if (status === "scheduled") {
+      query += " ORDER BY m.match_number ASC";
+    } else {
+      query += " ORDER BY m.match_date DESC, m.match_number ASC";
+    }
     const [rows] = await pool.query(query, params);
     res.json(rows);
   } catch (err) {

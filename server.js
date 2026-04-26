@@ -11,6 +11,7 @@ const inningsRoutes = require("./routes/innings");
 const resultsRoutes = require("./routes/results");
 const pointsRoutes = require("./routes/points");
 const statsRoutes = require("./routes/stats");
+const predictionsRoutes = require("./routes/predictions");
 
 const app = express();
 
@@ -30,6 +31,7 @@ app.use("/api/innings", inningsRoutes);
 app.use("/api/results", resultsRoutes);
 app.use("/api/points", pointsRoutes);
 app.use("/api/stats", statsRoutes);
+app.use("/api/predictions", predictionsRoutes);
 
 const PORT = process.env.PORT || 5000;
 
