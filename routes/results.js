@@ -10,45 +10,6 @@ async function getTeamName(conn, team_id) {
   return team?.team_name || "";
 }
 
-async function updateNRR(conn, team_id) {
-  const [scored] = await conn.query(
-    `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0.1) AS overs
-     FROM innings i
-     JOIN matches m ON i.match_id = m.match_id
-     WHERE i.batting_team_id = ? AND m.status = 'completed'`,
-    [team_id]
-  );
-
-  const [conceded] = await conn.query(
-    `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0.1) AS overs
-     FROM innings i
-     JOIN matches m ON i.match_id = m.match_id
-     WHERE i.bowling_team_id = ? AND m.status = 'completed'`,
-    [team_id]
-  );
-
-  // Convert stored overs (e.g. 3.4 = 3 overs 4 balls) to real fractional overs
-  function toRealOvers(storedOvers) {
-    const str = String(storedOvers);
-    const [whole, balls = "0"] = str.split(".");
-    return parseInt(whole) + parseInt(balls) / 6;
-  }
-
-  const rs  = Number(scored[0]?.runs   || 0);
-  const of_ = toRealOvers(scored[0]?.overs   || 0.1);
-  const rc  = Number(conceded[0]?.runs  || 0);
-  const ob  = toRealOvers(conceded[0]?.overs  || 0.1);
-
-  const nrr = ((rs / (of_ || 0.1)) - (rc / (ob || 0.1))).toFixed(3);
-
-  await conn.query(
-    `UPDATE points_table
-     SET runs_scored = ?, overs_faced = ?, runs_conceded = ?, overs_bowled = ?, nrr = ?
-     WHERE team_id = ?`,
-    [rs, of_, rc, ob, nrr, team_id]
-  );
-}
-
 router.post("/abandon", async (req, res) => {
   const conn = await pool.getConnection();
   try {
@@ -85,20 +46,6 @@ router.post("/abandon", async (req, res) => {
       [match_id, result_text]
     );
 
-    // Update points table (each gets 1 point)
-    for (const tid of [team1Id, team2Id]) {
-      await conn.query(
-        `INSERT INTO points_table
-           (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
-         VALUES (?, 1, 0, 0, 1, 1, 0.000, 0, 0.0, 0, 0.0)
-         ON DUPLICATE KEY UPDATE
-           played = played + 1,
-           tied = tied + 1,
-           points = points + 1`,
-        [tid]
-      );
-      await updateNRR(conn, tid);
-    }
 
     await conn.commit();
     res.json({ success: true, message: "Match abandoned successfully" });
@@ -197,56 +144,9 @@ router.post("/complete", async (req, res) => {
       [match_id]
     );
 
-    const isTied = result_text === "Match Tied";
-    const isAbandoned = !!abandoned;
     const team1Id = match.team1_id;
     const team2Id = match.team2_id;
 
-    if (isTied || isAbandoned) {
-      // both teams: played+1, tied+1, points+1
-      for (const tid of [team1Id, team2Id]) {
-        await conn.query(
-          `INSERT INTO points_table
-             (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
-           VALUES (?, 1, 0, 0, 1, 1, 0.000, 0, 0.0, 0, 0.0)
-           ON DUPLICATE KEY UPDATE
-             played = played + 1,
-             tied = tied + 1,
-             points = points + 1`,
-          [tid]
-        );
-      }
-    } else {
-      const winnerId = winner_team_id;
-      const loserId =
-        Number(winner_team_id) === Number(team1Id) ? team2Id : team1Id;
-
-      // winner: played+1, won+1, points+2
-      await conn.query(
-        `INSERT INTO points_table
-           (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
-         VALUES (?, 1, 1, 0, 0, 2, 0.000, 0, 0.0, 0, 0.0)
-         ON DUPLICATE KEY UPDATE
-           played = played + 1,
-           won = won + 1,
-           points = points + 2`,
-        [winnerId]
-      );
-
-      // loser: played+1, lost+1
-      await conn.query(
-        `INSERT INTO points_table
-           (team_id, played, won, lost, tied, points, nrr, runs_scored, overs_faced, runs_conceded, overs_bowled)
-         VALUES (?, 1, 0, 1, 0, 0, 0.000, 0, 0.0, 0, 0.0)
-         ON DUPLICATE KEY UPDATE
-           played = played + 1,
-           lost = lost + 1`,
-        [loserId]
-      );
-    }
-
-    await updateNRR(conn, match.team1_id);
-    await updateNRR(conn, match.team2_id);
 
     await conn.commit();
     res.json({ success: true, result_text, winner_team_id, player_of_match });
