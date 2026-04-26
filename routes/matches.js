@@ -110,65 +110,12 @@ router.delete("/:id", async (req, res) => {
 
       const team2 = match.team2_id;
 
-      if (winner) {
-        // Winner: subtract played, won, points
-        await conn.query("UPDATE points_table SET played = played - 1, won = won - 1, points = points - 2 WHERE team_id = ?", [winner]);
-        // Loser: subtract played, lost
-        const loser = winner == team1 ? team2 : team1;
-        await conn.query("UPDATE points_table SET played = played - 1, lost = lost - 1 WHERE team_id = ?", [loser]);
-      } else if (result.result_text && (result.result_text.includes('Tied') || result.result_text.includes('No Result'))) {
-        // Both teams: subtract played, tied, points
-        await conn.query("UPDATE points_table SET played = played - 1, tied = tied - 1, points = points - 1 WHERE team_id IN (?, ?)", [team1, team2]);
-      }
-
       // Delete related data
       await conn.query("DELETE FROM innings_batting WHERE innings_id IN (SELECT innings_id FROM innings WHERE match_id = ?)", [matchId]);
       await conn.query("DELETE FROM innings_bowling WHERE innings_id IN (SELECT innings_id FROM innings WHERE match_id = ?)", [matchId]);
       await conn.query("DELETE FROM innings_extras WHERE innings_id IN (SELECT innings_id FROM innings WHERE match_id = ?)", [matchId]);
       // Delete innings
       await conn.query("DELETE FROM innings WHERE match_id = ?", [matchId]);
-
-      // Update NRR for both teams (after deleting innings)
-      for (const teamId of [team1, team2]) {
-        const [scored] = await conn.query(
-          `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0) AS overs
-           FROM innings i
-           JOIN matches m ON i.match_id = m.match_id
-           WHERE i.batting_team_id = ? AND m.status = 'completed'`,
-          [teamId]
-        );
-
-        const [conceded] = await conn.query(
-          `SELECT COALESCE(SUM(i.total_runs),0) AS runs, COALESCE(SUM(i.overs),0) AS overs
-           FROM innings i
-           JOIN matches m ON i.match_id = m.match_id
-           WHERE i.bowling_team_id = ? AND m.status = 'completed'`,
-          [teamId]
-        );
-
-        function toRealOvers(storedOvers) {
-          if (storedOvers === undefined || storedOvers === null) return 0;
-          const str = String(storedOvers);
-          const [whole = "0", balls = "0"] = str.split(".");
-          const wholeNum = parseInt(whole) || 0;
-          const ballsNum = parseInt(balls) || 0;
-          return wholeNum + (ballsNum / 6);
-        }
-
-        const rs = Number(scored[0]?.runs || 0);
-        const of_ = toRealOvers(scored[0]?.overs);
-        const rc = Number(conceded[0]?.runs || 0);
-        const ob = toRealOvers(conceded[0]?.overs);
-
-        const nrr = ((of_ > 0 ? rs / of_ : 0) - (ob > 0 ? rc / ob : 0)).toFixed(3);
-
-        await conn.query(
-          `UPDATE points_table
-           SET runs_scored = ?, overs_faced = ?, runs_conceded = ?, overs_bowled = ?, nrr = ?
-           WHERE team_id = ?`,
-          [rs, of_, rc, ob, nrr, teamId]
-        );
-      }
 
       // Delete match_result
       await conn.query("DELETE FROM match_result WHERE match_id = ?", [matchId]);
