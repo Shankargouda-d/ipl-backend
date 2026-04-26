@@ -12,6 +12,7 @@ const resultsRoutes = require("./routes/results");
 const pointsRoutes = require("./routes/points");
 const statsRoutes = require("./routes/stats");
 const predictionsRoutes = require("./routes/predictions");
+const fansRoutes = require("./routes/fans");
 
 const app = express();
 
@@ -32,6 +33,7 @@ app.use("/api/results", resultsRoutes);
 app.use("/api/points", pointsRoutes);
 app.use("/api/stats", statsRoutes);
 app.use("/api/predictions", predictionsRoutes);
+app.use("/api/fans", fansRoutes);
 
 const PORT = process.env.PORT || 5000;
 
