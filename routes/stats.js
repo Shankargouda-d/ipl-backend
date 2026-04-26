@@ -402,6 +402,39 @@ router.get("/team-compare", async (req, res) => {
   }
 });
 
+router.get("/team-compare-matches", async (req, res) => {
+  try {
+    const { team1, team2 } = req.query;
+    if (!team1 || !team2) {
+      return res.status(400).json({ error: "Both team IDs required" });
+    }
+
+    const [rows] = await db.query(`
+      SELECT 
+        i.batting_team_id AS team_id, 
+        m.match_id,
+        m.match_number, 
+        SUM(bs.runs) AS runs, 
+        SUM(bs.fours) AS fours, 
+        SUM(bs.sixes) AS sixes,
+        (SELECT SUM(bw.wickets) 
+         FROM innings i2 
+         JOIN bowling_scorecard bw ON i2.innings_id = bw.innings_id 
+         WHERE i2.match_id = m.match_id AND i2.bowling_team_id = i.batting_team_id) AS wickets_taken
+      FROM innings i
+      JOIN matches m ON i.match_id = m.match_id
+      JOIN batting_scorecard bs ON i.innings_id = bs.innings_id
+      WHERE i.batting_team_id IN (?, ?) AND m.status = 'completed'
+      GROUP BY i.match_id, i.batting_team_id, m.match_number, m.match_date
+      ORDER BY m.match_date ASC, m.match_number ASC
+    `, [team1, team2]);
+
+    res.json(rows);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
 
 
