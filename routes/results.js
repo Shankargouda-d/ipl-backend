@@ -98,6 +98,22 @@ router.post("/complete", async (req, res) => {
     if (abandoned) {
       // No Result — rain or abandoned — both teams get 1 point
       result_text = "No Result (Match Abandoned)";
+    } else if (innings.length >= 4) {
+      // Super Over Logic
+      const inn3 = innings[2];
+      const inn4 = innings[3];
+      if (Number(inn3.total_runs) > Number(inn4.total_runs)) {
+        winner_team_id = inn3.batting_team_id;
+        const name = await getTeamName(conn, inn3.batting_team_id);
+        result_text = `${name} won in super over`;
+      } else if (Number(inn4.total_runs) > Number(inn3.total_runs)) {
+        winner_team_id = inn4.batting_team_id;
+        const name = await getTeamName(conn, inn4.batting_team_id);
+        result_text = `${name} won in super over`;
+      } else {
+        winner_team_id = null;
+        result_text = "Match Tied (Super Over Tied)";
+      }
     } else if (Number(inn1.total_runs) > Number(inn2.total_runs)) {
       winner_team_id = inn1.batting_team_id;
       const diff = Number(inn1.total_runs) - Number(inn2.total_runs);
