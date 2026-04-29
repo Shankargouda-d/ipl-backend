@@ -77,6 +77,11 @@ router.get("/", async (req, res) => {
       const points = (won * 2) + tied;
       const nrr = (of_real > 0 ? rs / of_real : 0) - (ob_real > 0 ? rc / ob_real : 0);
 
+      const total_matches = 14;
+      const matches_left = Math.max(0, total_matches - played);
+      const max_possible_points = points + (matches_left * 2);
+      const wins_needed_to_16 = Math.max(0, 8 - won);
+
       return {
         ...t,
         played, won, lost, tied, points, 
@@ -84,7 +89,10 @@ router.get("/", async (req, res) => {
         runs_scored: rs,
         overs_faced: of_real.toFixed(2),
         runs_conceded: rc,
-        overs_bowled: ob_real.toFixed(2)
+        overs_bowled: ob_real.toFixed(2),
+        matches_left,
+        max_possible_points,
+        wins_needed_to_16
       };
     });
 
