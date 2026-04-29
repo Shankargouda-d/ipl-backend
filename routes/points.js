@@ -24,7 +24,7 @@ router.get("/", async (req, res) => {
         i.overs
       FROM innings i
       JOIN matches m ON i.match_id = m.match_id
-      WHERE m.status = 'completed'
+      WHERE m.status = 'completed' AND i.innings_number IN (1, 2)
     `);
 
     // Helper to convert cricket overs string like "19.4" to real mathematical fractional overs

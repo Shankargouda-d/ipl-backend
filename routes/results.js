@@ -100,19 +100,38 @@ router.post("/complete", async (req, res) => {
       result_text = "No Result (Match Abandoned)";
     } else if (innings.length >= 4) {
       // Super Over Logic
-      const inn3 = innings[2];
-      const inn4 = innings[3];
-      if (Number(inn3.total_runs) > Number(inn4.total_runs)) {
-        winner_team_id = inn3.batting_team_id;
-        const name = await getTeamName(conn, inn3.batting_team_id);
-        result_text = `${name} won in super over`;
-      } else if (Number(inn4.total_runs) > Number(inn3.total_runs)) {
-        winner_team_id = inn4.batting_team_id;
-        const name = await getTeamName(conn, inn4.batting_team_id);
-        result_text = `${name} won in super over`;
+      const inn3 = innings.find(i => i.innings_number === 3);
+      const inn4 = innings.find(i => i.innings_number === 4);
+
+      if (inn3 && inn4) {
+        if (Number(inn3.total_runs) > Number(inn4.total_runs)) {
+          winner_team_id = inn3.batting_team_id;
+          const name = await getTeamName(conn, inn3.batting_team_id);
+          result_text = `${name} won in super over`;
+        } else if (Number(inn4.total_runs) > Number(inn3.total_runs)) {
+          winner_team_id = inn4.batting_team_id;
+          const name = await getTeamName(conn, inn4.batting_team_id);
+          result_text = `${name} won in super over`;
+        } else {
+          winner_team_id = null;
+          result_text = "Match Tied (Super Over Tied)";
+        }
       } else {
-        winner_team_id = null;
-        result_text = "Match Tied (Super Over Tied)";
+        // Fallback to regular innings if SO data is incomplete
+        if (Number(inn1.total_runs) > Number(inn2.total_runs)) {
+          winner_team_id = inn1.batting_team_id;
+          const diff = Number(inn1.total_runs) - Number(inn2.total_runs);
+          const name = await getTeamName(conn, inn1.batting_team_id);
+          result_text = `${name} won by ${diff} runs`;
+        } else if (Number(inn2.total_runs) > Number(inn1.total_runs)) {
+          winner_team_id = inn2.batting_team_id;
+          const wickets = 10 - Number(inn2.total_wickets || 0);
+          const name = await getTeamName(conn, inn2.batting_team_id);
+          result_text = `${name} won by ${wickets} wickets`;
+        } else {
+          winner_team_id = null;
+          result_text = "Match Tied";
+        }
       }
     } else if (Number(inn1.total_runs) > Number(inn2.total_runs)) {
       winner_team_id = inn1.batting_team_id;
