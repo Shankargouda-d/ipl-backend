@@ -21,6 +21,7 @@ router.get("/", async (req, res) => {
         i.batting_team_id,
         i.bowling_team_id,
         i.total_runs,
+        i.total_wickets,
         i.overs
       FROM innings i
       JOIN matches m ON i.match_id = m.match_id
@@ -57,15 +58,19 @@ router.get("/", async (req, res) => {
 
       // Calculate NRR from innings table (much more reliable)
       inningsData.forEach(inn => {
+        const actualOvers = toRealOvers(inn.overs);
+        // Rule: If all out, use full quota (20 overs) for NRR calculation
+        const effectiveOvers = (Number(inn.total_wickets) >= 10) ? 20 : actualOvers;
+
         if (inn.batting_team_id === t.team_id) {
           // This team batted — add to runs scored / overs faced
           rs += (Number(inn.total_runs) || 0);
-          of_real += toRealOvers(inn.overs);
+          of_real += effectiveOvers;
         }
         if (inn.bowling_team_id === t.team_id) {
           // This team bowled — add to runs conceded / overs bowled
           rc += (Number(inn.total_runs) || 0);
-          ob_real += toRealOvers(inn.overs);
+          ob_real += effectiveOvers;
         }
       });
 
