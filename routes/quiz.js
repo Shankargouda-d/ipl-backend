@@ -51,10 +51,10 @@ router.get("/history/:visitor_id", async (req, res) => {
   try {
     const { visitor_id } = req.params;
     const [rows] = await pool.query(
-      `SELECT DATE(created_at) as date, SUM(points_earned) as points 
+      `SELECT DATE(attempted_at) as date, SUM(points_earned) as points 
        FROM quiz_attempts 
        WHERE visitor_id = ? 
-       GROUP BY DATE(created_at) 
+       GROUP BY DATE(attempted_at) 
        ORDER BY date DESC`,
       [visitor_id]
     );
@@ -89,40 +89,32 @@ router.get("/attempts/:visitor_id", async (req, res) => {
 
 // Submit quiz attempt
 router.post("/attempt", async (req, res) => {
-  const connection = await pool.getConnection();
   try {
-    await connection.beginTransaction();
     const { visitor_id, question_id, selected_option, is_correct, points_earned } = req.body;
     console.log("Quiz Attempt Request:", { visitor_id, question_id, selected_option, is_correct, points_earned });
 
-    // 0. Ensure user exists (Fix for Foreign Key issues)
-    await connection.query(
+    // 0. Ensure user exists
+    await pool.query(
       "INSERT IGNORE INTO quiz_users (visitor_id, nickname, total_points) VALUES (?, ?, 0)",
       [visitor_id, null]
     );
 
     // 1. Record attempt
-    const [result] = await connection.query(
+    await pool.query(
       "INSERT INTO quiz_attempts (visitor_id, question_id, selected_option, is_correct, points_earned) VALUES (?, ?, ?, ?, ?)",
       [visitor_id, question_id, selected_option, is_correct, points_earned]
     );
-    console.log("Insert Attempt Result:", result);
 
     // 2. Update total points
-    const [updResult] = await connection.query(
+    await pool.query(
       "UPDATE quiz_users SET total_points = total_points + ? WHERE visitor_id = ?",
       [points_earned, visitor_id]
     );
-    console.log("Update Points Result:", updResult);
 
-    await connection.commit();
     res.json({ success: true });
   } catch (err) {
     console.error("Quiz Attempt Error:", err);
-    await connection.rollback();
     res.status(500).json({ error: err.message });
-  } finally {
-    connection.release();
   }
 });
 
