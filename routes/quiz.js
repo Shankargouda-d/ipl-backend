@@ -69,13 +69,16 @@ router.get("/attempts/:visitor_id", async (req, res) => {
   try {
     const { visitor_id } = req.params;
     const [rows] = await pool.query(
-      "SELECT question_id, is_correct FROM quiz_attempts WHERE visitor_id = ?",
+      "SELECT question_id, selected_option, is_correct FROM quiz_attempts WHERE visitor_id = ?",
       [visitor_id]
     );
     
     const attemptsMap = {};
     rows.forEach(row => {
-      attemptsMap[row.question_id] = { isCorrect: !!row.is_correct };
+      attemptsMap[row.question_id] = { 
+        selectedOption: row.selected_option, 
+        isCorrect: !!row.is_correct 
+      };
     });
     
     res.json(attemptsMap);
@@ -89,23 +92,33 @@ router.post("/attempt", async (req, res) => {
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    const { visitor_id, question_id, is_correct, points_earned } = req.body;
+    const { visitor_id, question_id, selected_option, is_correct, points_earned } = req.body;
+    console.log("Quiz Attempt Request:", { visitor_id, question_id, selected_option, is_correct, points_earned });
 
-    // 1. Record attempt
+    // 0. Ensure user exists (Fix for Foreign Key issues)
     await connection.query(
-      "INSERT INTO quiz_attempts (visitor_id, question_id, is_correct, points_earned) VALUES (?, ?, ?, ?)",
-      [visitor_id, question_id, is_correct, points_earned]
+      "INSERT IGNORE INTO quiz_users (visitor_id, nickname, total_points) VALUES (?, ?, 0)",
+      [visitor_id, null]
     );
 
+    // 1. Record attempt
+    const [result] = await connection.query(
+      "INSERT INTO quiz_attempts (visitor_id, question_id, selected_option, is_correct, points_earned) VALUES (?, ?, ?, ?, ?)",
+      [visitor_id, question_id, selected_option, is_correct, points_earned]
+    );
+    console.log("Insert Attempt Result:", result);
+
     // 2. Update total points
-    await connection.query(
+    const [updResult] = await connection.query(
       "UPDATE quiz_users SET total_points = total_points + ? WHERE visitor_id = ?",
       [points_earned, visitor_id]
     );
+    console.log("Update Points Result:", updResult);
 
     await connection.commit();
     res.json({ success: true });
   } catch (err) {
+    console.error("Quiz Attempt Error:", err);
     await connection.rollback();
     res.status(500).json({ error: err.message });
   } finally {
