@@ -24,7 +24,7 @@ router.get("/stats/:visitor_id", async (req, res) => {
 
     // Get rank
     const [[{ rank }]] = await pool.query(
-      `SELECT COUNT(*) + 1 as rank FROM quiz_users WHERE total_points > ?`,
+      "SELECT COUNT(*) + 1 as `rank` FROM quiz_users WHERE total_points > ?",
       [user.total_points]
     );
 
