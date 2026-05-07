@@ -42,10 +42,10 @@ router.get("/purple-cap", async (req, res) => {
         t.team_name,
         t.short_name,
         SUM(bs.wickets) AS total_wickets,
-        SUM(bs.overs) AS total_overs,
+        (FLOOR(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)) / 6) + MOD(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 6) / 10) AS total_overs,
         SUM(bs.runs_conceded) AS runs_conceded,
         COUNT(DISTINCT i.match_id) AS matches_played,
-        ROUND(SUM(bs.runs_conceded) / NULLIF(SUM(bs.overs), 0), 2) AS economy,
+        ROUND(SUM(bs.runs_conceded) * 6 / NULLIF(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 0), 2) AS economy,
         ROUND(SUM(bs.runs_conceded) / NULLIF(SUM(bs.wickets), 0), 2) AS bowling_avg
       FROM bowling_scorecard bs
       JOIN innings i ON bs.innings_id = i.innings_id
@@ -70,6 +70,7 @@ router.get("/hundreds", async (req, res) => {
         p.player_name,
         t.team_name,
         t.short_name,
+        COUNT(DISTINCT i.match_id) AS matches_played,
         SUM(CASE WHEN bs.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
         SUM(bs.runs) AS total_runs
       FROM batting_scorecard bs
@@ -150,6 +151,7 @@ router.get("/most-fours", async (req, res) => {
         p.player_name,
         t.team_name,
         t.short_name,
+        COUNT(DISTINCT i.match_id) AS matches_played,
         SUM(bs.fours) AS total_fours
       FROM batting_scorecard bs
       JOIN innings i ON bs.innings_id = i.innings_id
@@ -249,9 +251,9 @@ router.get("/compare", async (req, res) => {
           bs.player_id,
           COUNT(DISTINCT i.match_id) AS total_matches,
           SUM(bs.wickets) AS total_wickets,
-          SUM(bs.overs) AS total_overs,
+          (FLOOR(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)) / 6) + MOD(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 6) / 10) AS total_overs,
           SUM(bs.runs_conceded) AS runs_conceded,
-          ROUND(SUM(bs.runs_conceded) / NULLIF(SUM(bs.overs), 0), 2) AS economy,
+          ROUND(SUM(bs.runs_conceded) * 6 / NULLIF(SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)), 0), 2) AS economy,
           ROUND(SUM(bs.runs_conceded) / NULLIF(SUM(bs.wickets), 0), 2) AS bowling_avg
         FROM bowling_scorecard bs
         JOIN innings i ON bs.innings_id = i.innings_id
